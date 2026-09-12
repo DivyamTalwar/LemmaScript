@@ -1,7 +1,7 @@
 # LemmaScript — Implementation Specification
 
-**Version:** 0.6.1
-**Date:** August 2026
+**Version:** 0.6.2
+**Date:** September 2026
 
 Backend-specific details:
 - [SPEC_LEAN.md](SPEC_LEAN.md) — Lean backend (Velvet/Loom, four-file scheme, proof workflow)
