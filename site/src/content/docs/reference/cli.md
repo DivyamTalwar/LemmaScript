@@ -68,6 +68,13 @@ Never delete `<name>.dfy` and `gen` fresh — you'd lose every proof addition.
 additions-only check, skipping the prover (CI uses this when a separate `check`
 pass does the verifying).
 
+Recovery state depends on the failure stage. A conflict restores the original proof
+and retains the old `.dfy.base`; an additions-only failure also retains that anchor.
+If the merge is clean and additions-only but verification fails, `.dfy.base` instead
+advances to the new generation already present in the proof. Keep it while fixing
+the proof. A successful `regen` removes the anchor, also under `--no-verify`.
+Do not discard an anchor solely because a command failed.
+
 ### `lsc extract` and `lsc info`
 
 Backend-neutral: they run regardless of any `//@ backend` directive.

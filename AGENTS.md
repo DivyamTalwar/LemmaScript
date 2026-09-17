@@ -60,16 +60,15 @@ Do **not** `rm foo.dfy foo.dfy.gen && npx lsc gen ...` — that drops every proo
 
 `regen` anchors its three-way merge on `foo.dfy.base` if that file exists, otherwise on the previous `.dfy.gen`. When a merge is clean but verification fails, `regen` advances `foo.dfy.base` to the newly generated `.dfy.gen` before reporting failure. That anchor is intentional: the proof file already contains the new generated content, so the next regen can preserve proof additions while merging from the generation it actually contains.
 
-A merge conflict or an additions-only failure keeps the old anchor because the merge was not accepted. Inspect `foo.dfy.merged` and repair the proof state before retrying; do not delete the anchor merely to make the next command run.
+A merge conflict keeps the old anchor and restores the original proof; inspect `foo.dfy.merged` before retrying. An additions-only failure also keeps the old anchor; repair the generated-line changes in the proof. Do not delete either anchor merely to make the next command run.
 
-On older checkouts, or when a base is independently known to be stale, delete it and regen again:
+A successful `regen` removes `.dfy.base`, including under `--no-verify` after a clean additions-only merge. To clear recovery state manually, first confirm that the proof matches the current generated file and verifies:
 
 ```sh
-rm -f foo.dfy.base
-npx lsc regen --backend=dafny foo.ts
+npx lsc check --backend=dafny foo.ts && rm -f foo.dfy.base
 ```
 
-With no `.base` present, regen correctly anchors on the current `.dfy.gen`, preserves your proof additions, and merges cleanly. (Equivalently: after any failed `regen`, fix the proofs in `foo.dfy` and run `lsc check` — which never touches `.base` — then `rm -f foo.dfy.base` before your next `regen`.) Keep `*.dfy.base` out of version control.
+Only after that successful check is the current `.dfy.gen` an established replacement anchor. On older checkouts, back up the proof and recovery files before investigating a suspected stale anchor; a failed command alone is not evidence that deleting it is safe. Keep `*.dfy.base` out of version control.
 
 ## Annotation pitfalls
 
