@@ -60,13 +60,13 @@ Non-pure functions become Dafny `method` declarations.
 
 1. Read old `foo.dfy.gen` before overwriting
 2. Regenerate `foo.dfy.gen`
-3. If `foo.dfy` doesn't exist → create from gen, verify, done
-4. If gen changed → three-way merge (`git merge-file`) using old gen as base
+3. If `foo.dfy` doesn't exist → create from gen, verify unless `--no-verify`, done
+4. Choose the existing `.dfy.base`, or otherwise the old gen, as the anchor; merge (`git merge-file`) when the new gen differs
 5. Check additions-only invariant
-6. Verify merged `foo.dfy`
-7. On success, delete `.dfy.base` (gen is now the anchor)
+6. Verify merged `foo.dfy` unless `--no-verify`; if verification fails, advance `.dfy.base` to the new gen before exiting with failure
+7. On success, delete `.dfy.base` (gen is now the anchor), including when verification was explicitly skipped
 
-On merge conflict, the original `foo.dfy` is restored and the merged result is saved as `foo.dfy.merged` for manual inspection.
+On merge conflict, the original `foo.dfy` is restored and the merged result is saved as `foo.dfy.merged` for manual inspection. Conflicts and additions-only failures retain the old anchor. A verifier failure after a clean additions-only merge instead retains the new anchor, because the proof already contains that generation; the next retry must not merge it a second time.
 
 ---
 
