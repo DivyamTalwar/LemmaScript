@@ -7,6 +7,7 @@
  */
 
 import { existsSync, readFileSync } from "fs";
+import { ts } from "ts-morph";
 import path from "path";
 
 export const OPTION_SPECS = {
@@ -136,10 +137,76 @@ function parseDirectiveValue(key: keyof OptionSpecs, text: string, source: strin
   return parseValue(key, text, source);
 }
 
+/**
+ * Return source lines that contain a directive in actual comment trivia.
+ *
+ * A line-oriented regexp cannot distinguish a comment from a line inside a
+ * string or template literal. TypeScript's scanner already knows that lexical
+ * boundary, so use it only to select candidate lines and keep the existing
+ * directive parser responsible for validation and diagnostics.
+ */
+function directiveCommentLines(sourceText: string): Set<number> {
+  const lines = new Set<number>();
+  const literalRanges: Array<{ start: number; end: number }> = [];
+  const sourceFile = ts.createSourceFile(
+    "lemmascript-options.ts",
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const visit = (node: ts.Node): void => {
+    if (node.kind === ts.SyntaxKind.StringLiteral ||
+        node.kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral ||
+        node.kind === ts.SyntaxKind.TemplateExpression ||
+        node.kind === ts.SyntaxKind.RegularExpressionLiteral) {
+      literalRanges.push({ start: node.getStart(sourceFile), end: node.end });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+
+  const isInsideLiteral = (position: number): boolean =>
+    literalRanges.some(range => range.start <= position && position < range.end);
+
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest,
+    false,
+    ts.LanguageVariant.Standard,
+    sourceText,
+  );
+
+  const addLines = (start: number, end: number): void => {
+    let cursor = start;
+    while (cursor < end) {
+      const lineStart = sourceText.lastIndexOf("\n", cursor - 1) + 1;
+      const nextNewline = sourceText.indexOf("\n", cursor);
+      const lineEnd = nextNewline < 0 ? sourceText.length : nextNewline;
+      const lineNumber = sourceText.slice(0, lineStart).split("\n").length - 1;
+      const lineText = sourceText.slice(lineStart, lineEnd).replace(/\r$/, "");
+      // A BOM is part of the first line rather than comment trivia. Strip it
+      // for the same source-level spelling accepted by the preamble scanner.
+      const normalized = lineNumber === 0 ? lineText.replace(/^\uFEFF/, "") : lineText;
+      if (/^[ \t]*\/\/@/.test(normalized)) lines.add(lineNumber);
+      if (nextNewline < 0) break;
+      cursor = nextNewline + 1;
+    }
+  };
+
+  for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
+    if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
+      const start = scanner.getTokenPos();
+      if (!isInsideLiteral(start)) addLines(start, scanner.getTextPos());
+    }
+  }
+  return lines;
+}
+
 /** Parse top-of-file `//@ option key value` directives and legacy aliases. */
 export function parseFileOptions(sourceText: string, source: string): ExplicitOptions {
   const lines = sourceText.split(/\r?\n/);
   const leadingLines = leadingCommentLineCount(lines);
+  const commentLines = directiveCommentLines(sourceText);
   const seen = new Map<keyof OptionSpecs, number>();
   const out: Record<string, unknown> = {};
 
@@ -154,7 +221,8 @@ export function parseFileOptions(sourceText: string, source: string): ExplicitOp
 
   const parseLine = (lineText: string, index: number, inLeadingRegion: boolean): void => {
     const line = index + 1;
-    const optionMatch = lineText.match(/^[ \t]*\/\/@[ \t]+option(?:[ \t]+(.*?))?[ \t]*$/);
+    const normalizedLineText = index === 0 ? lineText.replace(/^\uFEFF/, "") : lineText;
+    const optionMatch = normalizedLineText.match(/^[ \t]*\/\/@[ \t]+option(?:[ \t]+(.*?))?[ \t]*$/);
     if (optionMatch) {
       if (!inLeadingRegion) fail(`${source}:${line}`, "//@ option directives must appear before the first source statement");
       const parts = (optionMatch[1] ?? "").trim().split(/\s+/).filter(Boolean);
@@ -169,7 +237,7 @@ export function parseFileOptions(sourceText: string, source: string): ExplicitOp
       return;
     }
 
-    const aliasMatch = lineText.match(/^[ \t]*\/\/@[ \t]+([A-Za-z][A-Za-z0-9-]*)[ \t]*$/);
+    const aliasMatch = normalizedLineText.match(/^[ \t]*\/\/@[ \t]+([A-Za-z][A-Za-z0-9-]*)[ \t]*$/);
     if (!aliasMatch) return;
     const alias = aliasMatch[1];
     for (const key of KNOWN_KEYS) {
@@ -184,7 +252,9 @@ export function parseFileOptions(sourceText: string, source: string): ExplicitOp
     }
   };
 
-  for (let i = 0; i < lines.length; i++) parseLine(lines[i], i, i < leadingLines);
+  for (let i = 0; i < lines.length; i++) {
+    if (commentLines.has(i)) parseLine(lines[i], i, i < leadingLines);
+  }
   return out as ExplicitOptions;
 }
 
