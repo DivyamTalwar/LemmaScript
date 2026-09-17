@@ -145,6 +145,13 @@ back to strict ESNext defaults; without a LemmaScript config it uses backward-
 compatible option defaults. From a source checkout, the
 equivalent of `lsc` is `npx tsx <checkout>/tools/src/lsc.ts` — no build step needed.
 
+For Lean checks, the nearest ancestor containing either `lakefile.lean` or
+`lakefile.toml` is the build directory. Discovery starts in the source directory
+and includes the filesystem root. A nearer TOML project takes precedence over
+an outer Lean project, and vice versa. If neither file is found, `lsc check`
+reports an error without starting Lake. A missing proof file also fails before
+Lake is started.
+
 ## Next
 
 - [Installation](/installation/) — get `lsc` on your PATH
