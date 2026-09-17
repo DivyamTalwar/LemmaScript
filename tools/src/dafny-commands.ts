@@ -113,6 +113,11 @@ export function dafnyRegen(genPath: string, dfyPath: string, basePath: string, t
 
   // 7. Verify (skipped under --no-verify: caller verifies separately)
   if (!noVerify && !dafnyVerify(dfyPath, dir, timeLimit, extraFlags)) {
+    // The clean merge already incorporated this generation into the proof
+    // file. Keep that generation as the next merge anchor even though the
+    // verifier rejected the current proof state; otherwise the next regen
+    // compares against the pre-merge generation and can duplicate declarations.
+    writeFileSync(basePath, text);
     console.error(`FAILED: ${path.basename(dfyPath)} verification failed.`);
     process.exit(1);
   }
