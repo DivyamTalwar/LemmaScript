@@ -31,7 +31,7 @@ export function dafnyCheckDiff(genPath: string, dfyPath: string): boolean {
   try {
     diff = execFileSync(
       "git",
-      ["diff", "--no-index", "--minimal", "--", genPath, dfyPath],
+      ["diff", "--no-index", "--minimal", "--no-color", "--no-ext-diff", "--no-textconv", "--text", "--", genPath, dfyPath],
       { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] },
     );
   } catch (e: any) {
@@ -40,7 +40,7 @@ export function dafnyCheckDiff(genPath: string, dfyPath: string): boolean {
     // happened to return partial stdout.
     const status = e?.status;
     const stdout = typeof e?.stdout === "string" ? e.stdout : "";
-    if (status !== 1 || stdout.length === 0) {
+    if (status !== 1 || e?.signal != null || e?.code != null || !stdout.startsWith("diff --git ")) {
       const detail = typeof e?.stderr === "string" ? e.stderr.trim() : "";
       console.error(
         `ERROR: could not run \`git diff\` to verify ${path.basename(dfyPath)} is additions-only` +
@@ -51,7 +51,15 @@ export function dafnyCheckDiff(genPath: string, dfyPath: string): boolean {
     }
     diff = stdout;
   }
-  const deletions = diff.split("\n").filter(l => l.startsWith("-") && !l.startsWith("---"));
+  // Only file headers are metadata. Inside a hunk, even a line beginning
+  // with "---" is a deletion (for example, text inside a multiline string).
+  const deletions: string[] = [];
+  let inHunk = false;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("diff --git ")) inHunk = false;
+    else if (line.startsWith("@@ ")) inHunk = true;
+    else if (inHunk && line.startsWith("-")) deletions.push(line);
+  }
   if (deletions.length > 0) {
     console.error(`WARNING: ${path.basename(dfyPath)} has modifications to generated lines (not additions-only):`);
     for (const d of deletions.slice(0, 5)) console.error("  " + d);
