@@ -2,6 +2,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# CLI/runtime regressions live with the existing fixtures. They use local
+# temporary files and fake verifier executables, so they run before Dafny.
+npx tsx --test tools/fixtures/*.test.ts
+
 expect_failure() {
   local message="$1"
   shift
