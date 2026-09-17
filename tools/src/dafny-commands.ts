@@ -20,19 +20,36 @@ export function dafnyGen(genPath: string, dfyPath: string, text: string) {
 }
 
 export function dafnyCheckDiff(genPath: string, dfyPath: string): boolean {
-  if (!existsSync(dfyPath)) return true;
-  let diff = "";
-  try {
-    diff = execFileSync("git", ["diff", "--no-index", "--minimal", "--", genPath, dfyPath], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
-  } catch (e: any) {
-    // git diff exits 1 when files differ; stdout still holds the diff
-    if (e && e.stdout != null) {
-      diff = typeof e.stdout === "string" ? e.stdout : e.stdout.toString("utf-8");
-    } else {
-      // git couldn't be spawned: the check never ran, so fail loud, don't green-pass.
-      console.error(`ERROR: could not run \`git diff\` to verify ${path.basename(dfyPath)} is additions-only (is git installed?)`);
+  for (const filePath of [genPath, dfyPath]) {
+    if (!existsSync(filePath)) {
+      console.error(`ERROR: cannot verify additions-only diff; file does not exist: ${filePath}`);
       return false;
     }
+  }
+
+  let diff = "";
+  try {
+    diff = execFileSync(
+      "git",
+      ["diff", "--no-index", "--minimal", "--", genPath, dfyPath],
+      { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+  } catch (e: any) {
+    // `git diff --no-index` exits 1 for a valid, non-empty comparison. Every
+    // other exit shape means the comparison did not complete, even when git
+    // happened to return partial stdout.
+    const status = e?.status;
+    const stdout = typeof e?.stdout === "string" ? e.stdout : "";
+    if (status !== 1 || stdout.length === 0) {
+      const detail = typeof e?.stderr === "string" ? e.stderr.trim() : "";
+      console.error(
+        `ERROR: could not run \`git diff\` to verify ${path.basename(dfyPath)} is additions-only` +
+        `${status === undefined ? " (is git installed?)" : ` (git exited ${status})`}` +
+        `${detail ? `: ${detail}` : ""}`,
+      );
+      return false;
+    }
+    diff = stdout;
   }
   const deletions = diff.split("\n").filter(l => l.startsWith("-") && !l.startsWith("---"));
   if (deletions.length > 0) {
