@@ -120,9 +120,17 @@ src/scanner.ts 300 --isolate-assertions
 Format: `filepath [timeout_in_seconds] [extra prover flags…]`. Batching is
 fail-fast — the first failing entry stops the run.
 
-One safeguard: in a `check` batch (Dafny), entries whose timeout exceeds **60
-seconds** are downgraded to `gen-check` (generation + additions-only, no proving) so
-routine runs stay fast. Pass `--slow` to verify every entry with its full timeout.
+An explicit `--time-limit` overrides the timeout for every entry; without it,
+each entry keeps its manifest timeout (or the prover default if absent).
+`--extra-flags` follows the same independent precedence: it replaces, rather
+than appends to, manifest flags. An explicit `--extra-flags=` clears them.
+Repeated occurrences of either option remain errors.
+
+One safeguard: in a `check` batch (Dafny), entries whose **effective timeout**
+exceeds **60 seconds** are downgraded to `gen-check` (generation + additions-only,
+no proving). This applies after CLI overrides too. Pass `--slow` to verify those
+entries; for example, `lsc check --time-limit=120 --slow`. A lower CLI override
+can make a slow manifest entry eligible for an ordinary verification run.
 
 ## Flags
 

@@ -185,7 +185,7 @@ function main() {
     return;
   }
   if (!filePath) {
-    runBatch(cmd, backend, slow, configPath);
+    runBatch(cmd, backend, slow, configPath, timeLimit, extraFlags);
     return;
   }
   runFile(cmd, filePath, backend, timeLimit, extraFlags, noVerify, typedInfo, configPath);
@@ -239,21 +239,32 @@ function runConfig(filePath: string | undefined, configPath?: string): void {
   console.log(JSON.stringify({ configFile, options, artifactDir }, null, 2));
 }
 
-// Batch over LemmaScript-files.txt. `check` entries with a timeout above 60s
+// Batch over LemmaScript-files.txt. `check` entries with an effective timeout above 60s
 // (the CI limit) are gen-check only, unless --slow. Fail-fast: the first
 // failing entry exits. tools/check.sh drives this from source;
 // installed-package consumers run `lsc check`.
-function runBatch(cmd: string, backend: "lean" | "dafny", slow: boolean, configPath?: string) {
+function runBatch(
+  cmd: string,
+  backend: "lean" | "dafny",
+  slow: boolean,
+  configPath?: string,
+  timeLimit?: number,
+  extraFlags?: string,
+) {
   if (cmd !== "gen" && cmd !== "gen-check" && cmd !== "check") {
     console.error(`No file given, and batch mode supports gen|gen-check|check (not ${cmd}).`);
     process.exit(1);
   }
   for (const e of readEntries()) {
-    if (cmd === "check" && backend === "dafny" && !slow && e.timeout !== undefined && e.timeout > 60) {
-      console.log(`=== ${path.basename(e.file)} (timeout ${e.timeout}s > 60s, gen-check only) ===`);
+    // Override each field independently. An explicit empty --extra-flags=
+    // clears manifest flags, so use presence rather than truthiness.
+    const timeout = timeLimit ?? e.timeout;
+    const flags = extraFlags ?? e.flags;
+    if (cmd === "check" && backend === "dafny" && !slow && timeout !== undefined && timeout > 60) {
+      console.log(`=== ${path.basename(e.file)} (timeout ${timeout}s > 60s, gen-check only) ===`);
       runFile("gen-check", e.file, backend, undefined, undefined, false, false, configPath);
     } else {
-      runFile(cmd, e.file, backend, e.timeout, e.flags, false, false, configPath);
+      runFile(cmd, e.file, backend, timeout, flags, false, false, configPath);
     }
   }
 }
