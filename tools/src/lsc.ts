@@ -89,7 +89,7 @@ function main() {
   const backendIdx = args.findIndex(a => a.startsWith("--backend="));
   let backend: "lean" | "dafny" = "dafny";
   if (backendIdx >= 0) {
-    const val = args[backendIdx].split("=")[1];
+    const val = args[backendIdx].slice("--backend=".length);
     if (val !== "lean" && val !== "dafny") {
       console.error(`Unknown backend: ${val}. Use --backend=lean or --backend=dafny`);
       process.exit(1);
@@ -112,12 +112,13 @@ function main() {
   const timeLimitIdx = args.findIndex(a => a.startsWith("--time-limit="));
   let timeLimit: number | undefined;
   if (timeLimitIdx >= 0) {
-    const val = args[timeLimitIdx].split("=")[1];
-    if (!/^[1-9]\d*$/.test(val)) {
-      console.error(`Invalid --time-limit: ${val} (expected seconds as a positive integer)`);
+    const val = args[timeLimitIdx].slice("--time-limit=".length);
+    const parsed = Number(val);
+    if (!/^[1-9]\d*$/.test(val) || !Number.isSafeInteger(parsed)) {
+      console.error(`Invalid --time-limit: ${val} (expected seconds as a positive safe integer)`);
       process.exit(1);
     }
-    timeLimit = parseInt(val);
+    timeLimit = parsed;
     args.splice(timeLimitIdx, 1);
   }
 

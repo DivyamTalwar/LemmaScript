@@ -130,10 +130,16 @@ routine runs stay fast. Pass `--slow` to verify every entry with its full timeou
 |---|---|---|
 | `--backend=dafny\|lean` | all except extract/info | Backend to target. Default: `dafny` |
 | `--config=<path>` | config-aware commands | Pin `lemmascript.json` instead of nearest-ancestor discovery |
-| `--time-limit=<seconds>` | check, regen | Prover time limit (positive integer) |
+| `--time-limit=<seconds>` | check, regen | Prover time limit (positive safe integer, at most 9007199254740991) |
 | `--extra-flags="…"` | check, regen | Extra flags passed to the prover verbatim |
 | `--slow` | batch `check` | Verify long-timeout entries instead of downgrading them |
 | `--no-verify` | regen | Merge + additions-only check only; skip the prover |
+
+The complete backend and timeout value is validated: `--backend=dafny=extra`
+and `--time-limit=10=extra` are errors, not aliases for valid prefixes. Timeout
+values must be positive decimal integers that JavaScript can represent exactly;
+values that would round or overflow are rejected. Equals signs remain valid
+inside `--config` paths and opaque `--extra-flags` values.
 
 ## In-file directives the CLI honors
 
