@@ -21,6 +21,11 @@ All flags use the `--flag=value` form. Space-separated flags (`--backend lean`) 
 unknown flags are rejected with an error rather than silently ignored. Every command
 exits `0` on success and `1` on any failure.
 
+The core single-file commands accept at most one source path. Extra positional
+arguments are rejected before generation or verification; use a manifest batch
+rather than `lsc check first.ts second.ts`. `lsc version` takes no arguments.
+`claimcheck` remains a pass-through to its satellite CLI.
+
 ## Commands
 
 | Command | What it does |

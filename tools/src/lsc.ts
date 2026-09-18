@@ -44,6 +44,10 @@ function main() {
   // like lemmascript-claimcheck/-crosscheck) use this for their version
   // handshake; keep the output to the bare semver string.
   if (args[0] === "version") {
+    if (args.length !== 1) {
+      console.error("lsc version does not accept arguments");
+      process.exit(1);
+    }
     console.log(lscVersion());
     return;
   }
@@ -167,6 +171,13 @@ function main() {
   }
 
   const [cmd, filePath] = args;
+  if (args.length > 2) {
+    console.error(
+      `Unexpected extra arguments: ${JSON.stringify(args.slice(2))}. ` +
+      "Pass one source file, or omit it and use LemmaScript-files.txt for batch gen|gen-check|check.",
+    );
+    process.exit(1);
+  }
   if (!cmd) {
     console.error("Usage: lsc <gen|check|regen|extract|info> [--backend=lean|dafny] [--config=path] <file.ts>");
     console.error("       lsc config [--config=path] [<file.ts>]");
