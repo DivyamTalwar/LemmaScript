@@ -7,8 +7,8 @@
  */
 
 import { existsSync, readFileSync } from "fs";
-import { ts } from "ts-morph";
 import path from "path";
+import { ts } from "ts-morph";
 
 export const OPTION_SPECS = {
   "extern-default": {
@@ -96,35 +96,6 @@ export function validateOptions(raw: unknown, source: string): ExplicitOptions {
   return out as ExplicitOptions;
 }
 
-/** Last line in the leading-comment region. Directives after code are errors. */
-function leadingCommentLineCount(lines: string[]): number {
-  let inBlock = false;
-  for (let i = 0; i < lines.length; i++) {
-    let rest = lines[i];
-    if (i === 0) rest = rest.replace(/^\uFEFF/, "");
-    if (i === 0 && rest.startsWith("#!")) continue;
-    while (true) {
-      rest = rest.trimStart();
-      if (inBlock) {
-        const end = rest.indexOf("*/");
-        if (end < 0) break;
-        inBlock = false;
-        rest = rest.slice(end + 2);
-        continue;
-      }
-      if (rest.length === 0 || rest.startsWith("//")) break;
-      if (rest.startsWith("/*")) {
-        const end = rest.indexOf("*/", 2);
-        if (end < 0) { inBlock = true; break; }
-        rest = rest.slice(end + 2);
-        continue;
-      }
-      return i;
-    }
-  }
-  return lines.length;
-}
-
 function parseDirectiveValue(key: keyof OptionSpecs, text: string, source: string): LscOptions[typeof key] {
   const spec = OPTION_SPECS[key] as AnyOptionSpec;
   if (spec.type === "boolean") {
@@ -138,75 +109,53 @@ function parseDirectiveValue(key: keyof OptionSpecs, text: string, source: strin
 }
 
 /**
- * Return source lines that contain a directive in actual comment trivia.
+ * Find comment lines, marking those that occur before any code.
  *
- * A line-oriented regexp cannot distinguish a comment from a line inside a
- * string or template literal. TypeScript's scanner already knows that lexical
- * boundary, so use it only to select candidate lines and keep the existing
- * directive parser responsible for validation and diagnostics.
+ * Use the parsed syntax tree to skip strings, regexes, and template text.
+ * Without those boundaries, the scanner can read /[/*]/ as a block comment
+ * or treat a template's closing backtick as the start of another template.
  */
-function directiveCommentLines(sourceText: string): Set<number> {
-  const lines = new Set<number>();
-  const literalRanges: Array<{ start: number; end: number }> = [];
+function* fileCommentLines(sourceText: string): Generator<{ text: string; index: number; inLeadingRegion: boolean }> {
+  // Normalize once so a leading BOM also works before a shebang.
+  sourceText = sourceText.replace(/^\uFEFF/, "");
+  const lines = sourceText.split(/\r\n|[\n\r\u2028\u2029]/);
   const sourceFile = ts.createSourceFile(
-    "lemmascript-options.ts",
-    sourceText,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
+    "lemmascript-options.ts", sourceText, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS,
   );
+  const literalEnds = new Map<number, number>();
   const visit = (node: ts.Node): void => {
-    if (node.kind === ts.SyntaxKind.StringLiteral ||
-        node.kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral ||
-        node.kind === ts.SyntaxKind.TemplateExpression ||
-        node.kind === ts.SyntaxKind.RegularExpressionLiteral) {
-      literalRanges.push({ start: node.getStart(sourceFile), end: node.end });
+    if (ts.isStringLiteral(node) || ts.isRegularExpressionLiteral(node) || ts.isTemplateLiteralToken(node)) {
+      // Skip template text, keeping real comments inside ${...} visible.
+      // Missing recovery tokens must not send the scanner back to its start.
+      const start = node.getStart(sourceFile);
+      if (node.end > start) literalEnds.set(start, node.end);
     }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
 
-  const isInsideLiteral = (position: number): boolean =>
-    literalRanges.some(range => range.start <= position && position < range.end);
-
   const scanner = ts.createScanner(
-    ts.ScriptTarget.Latest,
-    false,
-    ts.LanguageVariant.Standard,
-    sourceText,
+    ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, sourceText,
   );
-
-  const addLines = (start: number, end: number): void => {
-    let cursor = start;
-    while (cursor < end) {
-      const lineStart = sourceText.lastIndexOf("\n", cursor - 1) + 1;
-      const nextNewline = sourceText.indexOf("\n", cursor);
-      const lineEnd = nextNewline < 0 ? sourceText.length : nextNewline;
-      const lineNumber = sourceText.slice(0, lineStart).split("\n").length - 1;
-      const lineText = sourceText.slice(lineStart, lineEnd).replace(/\r$/, "");
-      // A BOM is part of the first line rather than comment trivia. Strip it
-      // for the same source-level spelling accepted by the preamble scanner.
-      const normalized = lineNumber === 0 ? lineText.replace(/^\uFEFF/, "") : lineText;
-      if (/^[ \t]*\/\/@/.test(normalized)) lines.add(lineNumber);
-      if (nextNewline < 0) break;
-      cursor = nextNewline + 1;
-    }
-  };
-
+  let inLeadingRegion = true;
   for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
     if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
-      const start = scanner.getTokenPos();
-      if (!isInsideLiteral(start)) addLines(start, scanner.getTextPos());
+      const firstLine = sourceFile.getLineAndCharacterOfPosition(scanner.getTokenStart()).line;
+      const lastLine = sourceFile.getLineAndCharacterOfPosition(scanner.getTokenEnd() - 1).line;
+      for (let index = firstLine; index <= lastLine; index++) {
+        yield { text: lines[index], index, inLeadingRegion };
+      }
+    } else if (token !== ts.SyntaxKind.WhitespaceTrivia && token !== ts.SyntaxKind.NewLineTrivia &&
+               token !== ts.SyntaxKind.ShebangTrivia) {
+      inLeadingRegion = false;
+      const end = literalEnds.get(scanner.getTokenStart());
+      if (end !== undefined) scanner.resetTokenState(end);
     }
   }
-  return lines;
 }
 
 /** Parse top-of-file `//@ option key value` directives and legacy aliases. */
 export function parseFileOptions(sourceText: string, source: string): ExplicitOptions {
-  const lines = sourceText.split(/\r?\n/);
-  const leadingLines = leadingCommentLineCount(lines);
-  const commentLines = directiveCommentLines(sourceText);
   const seen = new Map<keyof OptionSpecs, number>();
   const out: Record<string, unknown> = {};
 
@@ -221,8 +170,7 @@ export function parseFileOptions(sourceText: string, source: string): ExplicitOp
 
   const parseLine = (lineText: string, index: number, inLeadingRegion: boolean): void => {
     const line = index + 1;
-    const normalizedLineText = index === 0 ? lineText.replace(/^\uFEFF/, "") : lineText;
-    const optionMatch = normalizedLineText.match(/^[ \t]*\/\/@[ \t]+option(?:[ \t]+(.*?))?[ \t]*$/);
+    const optionMatch = lineText.match(/^[ \t]*\/\/@[ \t]+option(?:[ \t]+(.*?))?[ \t]*$/);
     if (optionMatch) {
       if (!inLeadingRegion) fail(`${source}:${line}`, "//@ option directives must appear before the first source statement");
       const parts = (optionMatch[1] ?? "").trim().split(/\s+/).filter(Boolean);
@@ -237,7 +185,7 @@ export function parseFileOptions(sourceText: string, source: string): ExplicitOp
       return;
     }
 
-    const aliasMatch = normalizedLineText.match(/^[ \t]*\/\/@[ \t]+([A-Za-z][A-Za-z0-9-]*)[ \t]*$/);
+    const aliasMatch = lineText.match(/^[ \t]*\/\/@[ \t]+([A-Za-z][A-Za-z0-9-]*)[ \t]*$/);
     if (!aliasMatch) return;
     const alias = aliasMatch[1];
     for (const key of KNOWN_KEYS) {
@@ -252,8 +200,8 @@ export function parseFileOptions(sourceText: string, source: string): ExplicitOp
     }
   };
 
-  for (let i = 0; i < lines.length; i++) {
-    if (commentLines.has(i)) parseLine(lines[i], i, i < leadingLines);
+  for (const { text, index, inLeadingRegion } of fileCommentLines(sourceText)) {
+    parseLine(text, index, inLeadingRegion);
   }
   return out as ExplicitOptions;
 }
